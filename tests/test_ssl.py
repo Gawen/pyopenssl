@@ -40,7 +40,7 @@ from OpenSSL.SSL import SSLEAY_PLATFORM, SSLEAY_DIR, SSLEAY_BUILT_ON
 from OpenSSL.SSL import SENT_SHUTDOWN, RECEIVED_SHUTDOWN
 from OpenSSL.SSL import (
     SSLv2_METHOD, SSLv3_METHOD, SSLv23_METHOD, TLSv1_METHOD,
-    TLSv1_1_METHOD, TLSv1_2_METHOD)
+    TLSv1_1_METHOD, TLSv1_2_METHOD, DTLSv1_METHOD)
 from OpenSSL.SSL import OP_SINGLE_DH_USE, OP_NO_SSLv2, OP_NO_SSLv3
 from OpenSSL.SSL import (
     VERIFY_PEER, VERIFY_FAIL_IF_NO_PEER_CERT, VERIFY_CLIENT_ONCE, VERIFY_NONE)
@@ -505,7 +505,8 @@ class ContextTests(TestCase, _LoopbackMixin):
         for meth in methods:
             Context(meth)
 
-        maybe = [SSLv2_METHOD, SSLv3_METHOD, TLSv1_1_METHOD, TLSv1_2_METHOD]
+        maybe = [SSLv2_METHOD, SSLv3_METHOD, TLSv1_1_METHOD, TLSv1_2_METHOD,
+                DTLSv1_METHOD]
         for meth in maybe:
             try:
                 Context(meth)
@@ -2826,6 +2827,67 @@ class ConnectionTests(TestCase, _LoopbackMixin):
 
         self.assertEqual(server_protocol_version, client_protocol_version)
 
+    def test_dtls_handshake(self):
+        """
+        Verify an handshake with protocol DLTSv1_METHOD happens correctly.
+        """
+        serverContext = Context(DTLSv1_METHOD)
+        serverContext.use_privatekey(
+            load_privatekey(FILETYPE_PEM, cleartextPrivateKeyPEM))
+        serverCert = load_certificate(FILETYPE_PEM, cleartextCertificatePEM)
+        serverContext.use_certificate(serverCert)
+        serverConnection = Connection(serverContext, None)
+
+        def verify_cb(connection, cert, *args):
+            self.assertEquals(cert.subject_name_hash(),
+                    serverCert.subject_name_hash())
+            return 1
+
+        clientContext = Context(DTLSv1_METHOD)
+        clientContext.set_verify(VERIFY_PEER, verify_cb)
+        clientConnection = Connection(clientContext, None)
+        clientConnection.set_connect_state()
+
+        self._handshakeInMemory(clientConnection, serverConnection)
+
+    def test_dtls_timeout(self):
+        """
+        Verify DTLSv1_get_timeout() behaves correctly.
+        """
+        serverContext = Context(DTLSv1_METHOD)
+        serverContext.use_privatekey(
+            load_privatekey(FILETYPE_PEM, cleartextPrivateKeyPEM))
+        serverCert = load_certificate(FILETYPE_PEM, cleartextCertificatePEM)
+        serverContext.use_certificate(serverCert)
+        serverConnection = Connection(serverContext, None)
+
+        clientContext = Context(DTLSv1_METHOD)
+        clientConnection = Connection(clientContext, None)
+        clientConnection.set_connect_state()
+
+        clientConnection.set_connect_state()
+        serverConnection.set_accept_state()
+
+        # as handshake didn't start, dtlsv1_get_timeout() returns None
+        # because no timeout has to be handled.
+        self.assertIsNone(clientConnection.dtlsv1_get_timeout())
+
+        # starts handshake
+        for conn in [clientConnection, serverConnection]:
+            try:
+                conn.do_handshake()
+            except WantReadError:
+                pass
+
+        # Client sent the first packet and will re-send after a certain
+        # timeout, which should be returned by this method.
+        timeout = clientConnection.dtlsv1_get_timeout()
+        self.assertIs(type(timeout), float)
+
+        self._interactInMemory(clientConnection, serverConnection)
+
+        # handshake is performed, no timeout should be handled now.
+        self.assertIsNone(clientConnection.dtlsv1_get_timeout())
 
 class ConnectionGetCipherListTests(TestCase):
     """

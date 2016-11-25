@@ -51,6 +51,7 @@ SSLv23_METHOD = 3
 TLSv1_METHOD = 4
 TLSv1_1_METHOD = 5
 TLSv1_2_METHOD = 6
+DTLSv1_METHOD = 7
 
 OP_NO_SSLv2 = _lib.SSL_OP_NO_SSLv2
 OP_NO_SSLv3 = _lib.SSL_OP_NO_SSLv3
@@ -448,6 +449,7 @@ class Context(object):
         TLSv1_METHOD: "TLSv1_method",
         TLSv1_1_METHOD: "TLSv1_1_method",
         TLSv1_2_METHOD: "TLSv1_2_method",
+        DTLSv1_METHOD: "DTLSv1_method",
     }
     _methods = dict(
         (identifier, getattr(_lib, name))
@@ -456,8 +458,8 @@ class Context(object):
 
     def __init__(self, method):
         """
-        :param method: One of SSLv2_METHOD, SSLv3_METHOD, SSLv23_METHOD, or
-            TLSv1_METHOD.
+        :param method: One of SSLv2_METHOD, SSLv3_METHOD, SSLv23_METHOD,
+            TLSv1_METHOD, TLSv1_2_METHOD or DTLSv1_METHOD.
         """
         if not isinstance(method, integer_types):
             raise TypeError("method must be an integer")
@@ -1929,6 +1931,31 @@ class Connection(object):
 
         return _ffi.buffer(data[0], data_len[0])[:]
 
+    def dtlsv1_get_timeout(self):
+        """
+        If the DTLS logic expects to be called back after a certain amount of
+        time, returns the timestamp when the method handle_timeout() should be
+        called. If no timeout is expected, returns None.
+
+        :return: The timestamp when the next timeout will occur, if any. Else None
+        """
+
+        tv_sec = _ffi.new("time_t*")
+        tv_usec = _ffi.new("long int*")
+        result = _lib.DTLSv1_get_timeout_wrapped(self._ssl, tv_sec, tv_usec)
+
+        if result == 1:
+            return tv_sec[0] + tv_usec[0] / 1e6
+
+    def dtlsv1_handle_timeout(self):
+        """
+        When DTLS is being used, called after a timeout occured.
+
+        :return: None.
+        """
+
+        result = _lib.DTLSv1_handle_timeout(self._ssl)
+        self._raise_ssl_error(self._ssl, result)
 
 ConnectionType = Connection
 
